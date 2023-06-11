@@ -5,8 +5,20 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 
-g = 9.81
-filepath = pathlib.Path(__file__).parent / "data" / "accel.csv"
+G = 9.81
+
+FILEPATH = pathlib.Path(__file__).parent / "data" / "accel.csv"
+
+# times when the train is known to be static
+# tuples of (start_time, end_time)
+KNOWN_ZEROES = [
+    (0.0, 47.0), # Angers
+    (540.0, 570.0), # Savennières
+    (775.0, 830.0), # La Possonière
+    (1135.0, 1175.0), # Chalonnes
+    (1710.0, 1755.0), # Chemillé
+    # (), # Cholet, no significant data there
+]
 
 
 def csv_data_formatter(raw):
@@ -19,7 +31,6 @@ def csv_data_formatter(raw):
     """
     data = raw.replace(",", ".")
     return float(data)
-
 
 def load_data(path):
     """
@@ -43,30 +54,52 @@ def load_data(path):
             encoding="utf-8",
         )
 
-
 def normalize(data):
     """
     Nomalizes the data:
     converts from g to m.s^-2,
     changes the orientation to (forward, right, up),
-    removes the Earth gravity's influence.
 
     All this is done **in-place**; the modified input array is returned.
     """
-
-    # remove Earth's pull
-    data -= (0.0, 0.0, 0.0, 1.0)
 
     # reorientation
     data *= (1.0, -1.0, -1.0, 1.0)
 
     # conversion to S.I.
-    data[::, 1:] *= g
+    data[::, 1:] *= G
 
     return data
 
+def calibrate(data, static_times):
+    """
+    Calibrates the data to remove any systematic bias
+    (both static error from the sensor, and the Earth's pull).
+    This operation is done using the periods of time
+    when the system is assumed to be static, i.e. train stops.
 
-def plot_serie(ax, time, values, legend, ylabel=""):
+    static_times is an iterable of pairs (time_start, time_stop)
+    when the system is assumed unmoving.
+
+    This function operates **in-place**: the calibrated input array is returned.
+    """
+
+    # 1 when the system is static, 0 otherwise
+    mask = np.any(
+        np.stack(
+            [(start < data[::, 0]) & (data[::, 0] < stop) for start, stop in static_times],
+            axis=1,
+        ),
+        axis=1,
+    )
+
+    bias = np.mean(data[mask, 1:], axis=0)
+
+    data[::, 1:] -= bias
+
+    return data
+
+def plot_serie(ax, time, values, legend, ylabel):
     """
     Plots the given value set (1-dim) as a function of time,
     with the relevant title.
@@ -83,7 +116,9 @@ def plot_serie(ax, time, values, legend, ylabel=""):
 
 
 if __name__ == "__main__":
-    arr = normalize(load_data(filepath))
+    arr = load_data(FILEPATH)
+    arr = normalize(arr)
+    arr = calibrate(arr, KNOWN_ZEROES)
 
     fig, (ax_x, ax_y, ax_z) = plt.subplots(3, 1, sharex=True)
 
