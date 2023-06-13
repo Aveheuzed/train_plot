@@ -71,7 +71,7 @@ def normalize(data):
 
     return data
 
-def calibrate(data, static_times):
+def calibrate(times, data, static_times):
     """
     Calibrates the data to remove any systematic bias
     (both static error from the sensor, and the Earth's pull).
@@ -81,21 +81,21 @@ def calibrate(data, static_times):
     static_times is an iterable of pairs (time_start, time_stop)
     when the system is assumed unmoving.
 
-    This function operates **in-place**: the calibrated input array is returned.
+    This function operates **in-place** on data: the calibrated input array is returned.
     """
 
     # 1 when the system is static, 0 otherwise
     mask = np.any(
         np.stack(
-            [(start < data[::, 0]) & (data[::, 0] < stop) for start, stop in static_times],
+            [(start < times) & (times < stop) for start, stop in static_times],
             axis=1,
         ),
-        axis=1,
-    )
+        axis=1
+    ).flatten()
 
-    bias = np.mean(data[mask, 1:], axis=0)
+    bias = np.mean(data[mask, ::], axis=0)
 
-    data[::, 1:] -= bias
+    data -= bias
 
     return data
 
@@ -114,18 +114,45 @@ def plot_serie(ax, time, values, legend, ylabel):
 
     return lines
 
+def integrate(times, points):
+    """
+    Computes and returns the integral of each column in <points> relative to <time>.
+    """
+    delta_t = np.diff(times, prepend=0.0, axis=0)
+    return np.cumsum(points * delta_t, axis=0)
 
 if __name__ == "__main__":
     arr = load_data(FILEPATH)
     arr = normalize(arr)
-    arr = calibrate(arr, KNOWN_ZEROES)
 
-    fig, (ax_x, ax_y, ax_z) = plt.subplots(3, 1, sharex=True)
+    times = arr[::, :1]
 
-    plot_serie(ax_x, arr[::, 0], arr[::, 1], "x..", "x.. (m.s^-2)")
-    plot_serie(ax_y, arr[::, 0], arr[::, 2], "y..", "y.. (m.s^-2)")
-    plot_serie(ax_z, arr[::, 0], arr[::, 3], "z..", "z.. (m.s^-2)")
+    accel = arr[::, 1:]
+    accel = calibrate(times, accel, KNOWN_ZEROES)
 
-    ax_z.set_xlabel("time (s)")
+    speeds = integrate(times, accel)
+    # speeds = calibrate(times, speeds, KNOWN_ZEROES)
+
+    positions = integrate(times, speeds)
+
+
+    fig, axes = plt.subplots(3, 3, sharex=True)
+
+    X, Y, Z = 0, 1, 2
+    ACCEL, SPEED, POSITION = 0, 1, 2
+
+    plot_serie(axes[X, ACCEL], times, accel[::, X], "x..", "x.. (m.s^-2)")
+    plot_serie(axes[Y, ACCEL], times, accel[::, Y], "y..", "y.. (m.s^-2)")
+    plot_serie(axes[Z, ACCEL], times, accel[::, Z], "z..", "z.. (m.s^-2)")
+
+    plot_serie(axes[X, SPEED], times, speeds[::, X], "x.", "x. (m.s^-1)")
+    plot_serie(axes[Y, SPEED], times, speeds[::, Y], "y.", "y. (m.s^-1)")
+    plot_serie(axes[Z, SPEED], times, speeds[::, Z], "z.", "z. (m.s^-1)")
+
+    plot_serie(axes[X, POSITION], times, positions[::, X], "x", "x (m")
+    plot_serie(axes[Y, POSITION], times, positions[::, Y], "y", "y (m)")
+    plot_serie(axes[Z, POSITION], times, positions[::, Z], "z", "z (m)")
+
+    # ax_z.set_xlabel("time (s)")
 
     plt.show()
